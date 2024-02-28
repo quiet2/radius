@@ -36,3 +36,31 @@ if ($response === false) {
     // access request was accepted - client authenticated successfully
     echo "Success!  Received Access-Accept response from RADIUS server.\n";
 }
+
+$ssid = bin2hex(random_bytes(4));
+$radius = (new \Dapphp\Radius\Radius($server, $secret))
+    ->setAttributesInfo(40, ['Acct-Status-Type', 'I'])
+    ->setAttributesInfo(44, ['Acct-Session-Id', 'S'])
+    ->setAttributesInfo(46, ['Acct-Session-Time', 'I'])
+    ->setAttributesInfo(25, ['h323-setup-time', 'S'])
+    ->setAttributesInfo(30, ['h323-disconnect-cause', 'S'])
+    ->setDebug((bool)$debug);
+
+$response = $radius
+    ->setAttribute(6, 1) // Service-Type
+    ->setAttribute(30, '123') // Called-Station-Id
+    ->setAttribute(31, '321') // Calling-Station-Id
+    ->setAttribute(40, 1) // Acct-Status-Type
+    ->setAttribute(44, $ssid) // Acct-Session-Id
+    ->setVendorSpecificAttribute(VendorId::CISCO, 25,
+        'h323-setup-time=03:00:56.337 CET Wed Feb 28 2024') // h323-setup-time
+    ->accountingRequest();
+
+if ($response === false) {
+    echo sprintf("Accounting-Request failed with error %d (%s).\n",
+        $radius->getErrorCode(),
+        $radius->getErrorMessage()
+    );
+} else {
+    echo "Success!  Received Accounting-Response from RADIUS server.\n";
+}

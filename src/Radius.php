@@ -88,8 +88,17 @@ class Radius
     /** @var int Accounting-Response packet type identifier */
     const TYPE_ACCOUNTING_RESPONSE = 5;
 
-    /** @var int Access-Challenge packet type identifier */
+    const TYPE_ACCOUNTING_STATUS = 6;
+    const TYPE_PASSWORD_REQUEST = 7;
+    const TYPE_PASSWORD_ACCEPT = 8;
+    const TYPE_PASSWORD_REJECT= 9;
+    const TYPE_ACCOUNTING_MESSAGE = 10;
+    const TYPE_DISCONNECT_REQUEST = 40;
+
+        /** @var int Access-Challenge packet type identifier */
     const TYPE_ACCESS_CHALLENGE    = 11;
+    const TYPE_STATUS_SERVER    = 12;
+    const TYPE_STATUS_CLIENT    = 13;
 
     /** @var int Reserved packet type */
     const TYPE_RESERVED            = 255;
@@ -124,6 +133,9 @@ class Radius
 
     /** @var int Request-Authenticator, 16 octets random number */
     protected $requestAuthenticator;
+
+    /** @var string Request-Accounting-Authenticator, 16 octets */
+    protected $requestAccountingAuthenticator;
 
     /** @var int Request-Authenticator from the response */
     protected $responseAuthenticator;
@@ -1546,13 +1558,18 @@ class Radius
      * Send a RADIUS packet over the wire using UDP.
      *
      * @param string $packetData  The raw, complete, RADIUS packet to send
+     * @param int $port  Port number for connect RADIUS server
      * @return boolean|resource   false if the packet failed to send, or a socket resource on success
      */
-    private function sendRadiusRequest($packetData)
+    private function sendRadiusRequest($packetData, int $port = 0)
     {
+        if (!$port) {
+            $port = $this->authenticationPort;
+        }
+
         $packetLen  = strlen($packetData);
 
-        $conn = @fsockopen('udp://' . $this->server, $this->authenticationPort, $errno, $errstr);
+        $conn = @fsockopen('udp://' . $this->server, $port, $errno, $errstr);
         if (!$conn) {
             $this->errorCode    = $errno;
             $this->errorMessage = $errstr;
@@ -1702,7 +1719,9 @@ class Radius
 
             $authCheck = md5(
                 substr($packet, 0, 4) .
-                $this->getRequestAuthenticator() .
+                ($this->radiusPacket == self::TYPE_ACCOUNTING_REQUEST
+                    ? $this->requestAccountingAuthenticator
+                    : $this->getRequestAuthenticator()) .
                 $attrContent .
                 $this->getSecret()
             );
@@ -1765,6 +1784,8 @@ class Radius
         $hasAuthenticator = false;
         $attrContent = '';
         $offset      = null;
+        $requestId = $this->getNextIdentifier();
+        $packetData = '';
 
         foreach($this->attributesToSend as $i => $attr) {
             $len = strlen($attrContent);
@@ -1788,17 +1809,30 @@ class Radius
         $packetLen += strlen($this->getRequestAuthenticator()); // Request-Authenticator
         $packetLen += $attrLen; // Attributes
 
-        $packetData  = chr($this->radiusPacket);
-        $packetData .= pack('C', $this->getNextIdentifier());
-        $packetData .= pack('n', $packetLen);
-        $packetData .= $this->getRequestAuthenticator();
-        $packetData .= $attrContent;
+        // Accounting
+        if (in_array($this->radiusPacket, [self::TYPE_ACCOUNTING_REQUEST, self::TYPE_DISCONNECT_REQUEST])) {
+            $this->requestAccountingAuthenticator = $this->calcRequestAuthenticator(
+                $requestId,
+                20 + strlen($attrContent),
+                $attrContent
+            );
 
-        if ($hasAuthenticator && !is_null($offset)) {
-            $messageAuthenticator = hash_hmac('md5', $packetData, $this->secret, true);
-            // calculate packet hmac, replace hex 0's with actual hash
-            for ($i = 0; $i < strlen($messageAuthenticator); ++$i) {
-                $packetData[20 + $offset + $i] = $messageAuthenticator[$i];
+            $packetData = pack('CCn', $this->radiusPacket, $requestId, $packetLen)
+                . $this->requestAccountingAuthenticator . $attrContent;
+        }
+        else {
+            $packetData = chr($this->radiusPacket);
+            $packetData .= pack('C', $requestId);
+            $packetData .= pack('n', $packetLen);
+            $packetData .= $this->getRequestAuthenticator();
+            $packetData .= $attrContent;
+
+            if ($hasAuthenticator && !is_null($offset)) {
+                $messageAuthenticator = hash_hmac('md5', $packetData, $this->secret, true);
+                // calculate packet hmac, replace hex 0's with actual hash
+                for ($i = 0; $i < strlen($messageAuthenticator); ++$i) {
+                    $packetData[20 + $offset + $i] = $messageAuthenticator[$i];
+                }
             }
         }
 
@@ -1949,5 +1983,82 @@ class Radius
         }
 
         return $value;
+    }
+
+    public function setAttributesInfo(int $index, array $params)
+    {
+        $this->attributesInfo[$index] = $params;
+
+        return $this;
+    }
+
+    public function accountingRequest($username = '', $password = '', $timeout = 0): bool
+    {
+        $this->clearDataReceived()
+            ->clearError()
+            ->setPacketType(self::TYPE_ACCOUNTING_REQUEST);
+
+        if (0 < strlen($username)) {
+            $this->setUsername($username);
+        }
+
+        if (0 < strlen($password)) {
+            $this->setPassword($password);
+        }
+
+        if (intval($timeout) > 0) {
+            $this->setTimeout($timeout);
+        }
+
+        $packetData = $this->generateRadiusPacket();
+
+        $conn = $this->sendRadiusRequest($packetData, $this->accountingPort);
+        if (!$conn) {
+            $this->debugInfo(sprintf(
+                    'Failed to send packet to %s; error: %s',
+                    $this->server,
+                    $this->getErrorMessage())
+            );
+
+            return false;
+        }
+
+        $receivedPacket = $this->readRadiusResponse($conn);
+        @fclose($conn);
+
+        if (!$receivedPacket) {
+            $this->debugInfo(sprintf(
+                    'Error receiving response packet from %s; error: %s',
+                    $this->server,
+                    $this->getErrorMessage())
+            );
+
+            return false;
+        }
+
+        if (!$this->parseRadiusResponsePacket($receivedPacket)) {
+            $this->debugInfo(sprintf(
+                    'Bad RADIUS response from %s; error: %s',
+                    $this->server,
+                    $this->getErrorMessage())
+            );
+
+            return false;
+        }
+
+        if ($this->radiusPacketReceived == self::TYPE_ACCESS_REJECT) {
+            $this->errorCode    = 3;
+            $this->errorMessage = 'Access rejected';
+        }
+
+        return ($this->radiusPacketReceived == self::TYPE_ACCOUNTING_RESPONSE);
+    }
+
+    private function calcRequestAuthenticator($id, $length, $attributes): string
+    {
+        $authenticator = str_repeat("\x00", 16);
+        $hdr = pack('CCn', $this->radiusPacket, $id, $length);
+
+        return md5($hdr . $authenticator . $attributes . $this->secret, true);
     }
 }
