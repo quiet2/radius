@@ -87,7 +87,7 @@ class EAPPacket
      * @param int $id  The CHAP packet identifier (random if omitted)
      * @return string An EAP packet with embedded MS-CHAP-V2 packet in the data field
      */
-    public static function mschapv2(\Dapphp\Radius\MsChapV2Packet $chapPacket, $id = null)
+    public static function mschapv2(MsChapV2Packet $chapPacket, $id = null)
     {
         $packet = new self();
         $packet->setId($id);

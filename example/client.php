@@ -7,7 +7,7 @@
 error_reporting(E_ALL);
 ini_set('display_errors', 1);
 
-require_once __DIR__ . '/../autoload.php';
+require_once '../src/Radius.php';
 
 $server = (getenv('RADIUS_SERVER_ADDR')) ?: '192.168.0.20';
 $user   = (getenv('RADIUS_USER'))        ?: 'nemo';
@@ -15,7 +15,7 @@ $pass   = (getenv('RADIUS_PASS'))        ?: 'arctangent';
 $secret = (getenv('RADIUS_SECRET'))      ?: 'xyzzy5461';
 $debug  = in_array('-v', $_SERVER['argv']);
 
-$radius = new \Dapphp\Radius\Radius();
+$radius = new Dapphp\Radius\Radius();
 $radius->setServer($server)        // IP or hostname of RADIUS server
        ->setSecret($secret)       // RADIUS shared secret
        ->setNasIpAddress('127.0.0.1')  // IP or hostname of NAS (device authenticating user)
@@ -38,7 +38,7 @@ if ($response === false) {
 }
 
 $ssid = bin2hex(random_bytes(4));
-$radius = (new \Dapphp\Radius\Radius($server, $secret))
+$radius = (new Dapphp\Radius\Radius($server, $secret))
     ->setAttributesInfo(40, ['Acct-Status-Type', 'I'])
     ->setAttributesInfo(44, ['Acct-Session-Id', 'S'])
     ->setAttributesInfo(46, ['Acct-Session-Time', 'I'])
@@ -47,13 +47,25 @@ $radius = (new \Dapphp\Radius\Radius($server, $secret))
     ->setDebug((bool)$debug);
 
 $response = $radius
+    ->setAttribute(1, $user) // User-Name
     ->setAttribute(6, 1) // Service-Type
-    ->setAttribute(30, '123') // Called-Station-Id
-    ->setAttribute(31, '321') // Calling-Station-Id
+    ->setAttribute(30, '___to___') // Called-Station-Id
+    ->setAttribute(31, '___from___') // Calling-Station-Id
     ->setAttribute(40, 1) // Acct-Status-Type
     ->setAttribute(44, $ssid) // Acct-Session-Id
-    ->setVendorSpecificAttribute(VendorId::CISCO, 25,
+    ->setVendorSpecificAttribute(9, 25,
         'h323-setup-time=03:00:56.337 CET Wed Feb 28 2024') // h323-setup-time
+    ->accountingRequest();
+
+$response = $radius
+    ->resetAttributes()
+    ->resetVendorSpecificAttributes()
+    ->setAttribute(1, $user) // User-Name
+    ->setAttribute(40, 2) // Acct-Status-Type
+    ->setAttribute(44, $ssid) // Acct-Session-Id
+    ->setAttribute(46, 15) // Acct-Session-Time (duration)
+    ->setVendorSpecificAttribute(9, 30,
+        "h323-disconnect-cause=" . dechex(16)) // release_code
     ->accountingRequest();
 
 if ($response === false) {

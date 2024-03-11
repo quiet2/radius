@@ -9,7 +9,7 @@
 error_reporting(E_ALL);
 ini_set('display_errors', 1);
 
-require_once __DIR__ . '/../autoload.php';
+require_once '../src/Radius.php';
 
 $server = (getenv('RADIUS_SERVER_ADDR')) ?: '192.168.0.20';
 $user   = (getenv('RADIUS_USER'))        ?: 'nemo';
@@ -17,7 +17,7 @@ $pass   = (getenv('RADIUS_PASS'))        ?: 'arctangent';
 $secret = (getenv('RADIUS_SECRET'))      ?: 'xyzzy5461';
 $debug  = in_array('-v', $_SERVER['argv']);
 
-$radius = new \Dapphp\Radius\Radius();
+$radius = new Dapphp\Radius\Radius();
 $radius->setServer($server)            // IP or hostname of RADIUS server
        ->setSecret($secret)            // RADIUS shared secret
        ->setAttribute(32, 'login')               // NAS port

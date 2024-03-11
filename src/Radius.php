@@ -63,6 +63,11 @@
 
 namespace Dapphp\Radius;
 
+use Dapphp\Radius\Crypt\Crypt_CHAP_MSv1;
+use Dapphp\Radius\Crypt\Crypt_CHAP_MSv2;
+use Dapphp\Radius\Crypt\Crypt_CHAP_MD5;
+use Dapphp\Radius\Crypt\Crypt_CHAP;
+
 /**
  * A pure PHP RADIUS client implementation.
  *
@@ -546,7 +551,7 @@ class Radius
      */
     public function setMsChapPassword($password, $challenge = null)
     {
-        $chap = new \Crypt_CHAP_MSv1();
+        $chap = new Crypt_CHAP_MSv1();
         $chap->chapid   = mt_rand(1, 255);
         $chap->password = $password;
         if (is_null($challenge)) {
@@ -1259,7 +1264,7 @@ class Radius
         $challenge  = $chapPacket->challenge;
         $chapId     = $chapPacket->msChapId;
 
-        $msChapV2   = new \Crypt_CHAP_MSv2;
+        $msChapV2   = new Crypt_CHAP_MSv2();
         $msChapV2->username      = $username;
         $msChapV2->password      = $password;
         $msChapV2->chapid        = $chapId;
@@ -1463,7 +1468,7 @@ class Radius
 
         $chapId     = $chapPacket->msChapId + 1;
 
-        $msChapV2   = new \Crypt_CHAP_MSv2;
+        $msChapV2   = new Crypt_CHAP_MSv2;
         $msChapV2->username      = $username;
         $msChapV2->password      = $password;
         $msChapV2->chapid        = $chapId;
